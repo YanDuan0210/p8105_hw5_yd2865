@@ -9,6 +9,7 @@ output: github_document
 knitr::opts_chunk$set(echo = TRUE)
 
 library(tidyverse)
+library(purrr)
 library(broom)
 
 theme_set(theme_minimal() + theme(legend.position = "bottom"))
@@ -72,15 +73,19 @@ sim_results_df |>
 ```{r}
 simulate_t_tests = function(mu, n = 30, sigma = 5, n_sim = 5000) {
   
-  map_dfr(1:n_sim, function(i) {
-    
-    x = rnorm(n, mean = mu, sd = sigma)
-    est = mean(x)
-    se = sd(x) / sqrt(n)
-    t = est / se
-    p = 2 * pt(abs(t), df = n - 1, lower.tail = FALSE)
-    tibble(mu_true = mu, sim = i, estimate = est, p.value = p, reject = p < 0.05)
-    
+  x_list = replicate(n_sim, rnorm(n, mean = mu, sd = sigma), simplify = FALSE)
+  t_list = lapply(x_list, t.test, mu = 0) 
+
+  map_dfr(seq_along(t_list), function(i) {
+    ti = t_list[[i]]   
+    broom::tidy(ti) |>
+      transmute(
+        mu_true = mu,
+        sim = i,
+        estimate,
+        p.value,
+        reject  = p.value < 0.05
+      )
   })
 }
 ```
@@ -106,10 +111,10 @@ summary_df =
 summary_df
 ```
 
-#### Make a plot(Power vs mu_true)
+#### Make a plot
 
 ```{r}
-# Plot1
+# Power vs. mu_true
 summary_df |> 
   ggplot(aes(x = mu_true, y = power)) +
   geom_line() +
@@ -121,4 +126,38 @@ summary_df |>
     y = "Power"
   )
 ```
+
+**Comments**: The plot shows how the power of the one-sample t-test increases as the true mean moves farther away from the null value of 0. When true mean = 0,the power is approximately equal to the significance level of 0.05. As the true mean increases, the power rises rapidly: when true mean reaches around 2 to 3, the power has reached a relatively high level; when true mean ≥ 4, the power approaches 1, meaning that the test can almost always correctly reject the null hypothesis. 
+This indicates that the larger the effect size, the higher the power of the test.
+
+```{r}
+# Average of mu_hat across all simulations.
+summary_df |> 
+  ggplot(aes(x = mu_true, y = avg_mu_hat_all)) +
+  geom_line() +
+  geom_point() +
+  scale_x_continuous(breaks = mus) +
+  labs(
+    title = "Average estimate vs. true mean (all tests)",
+    x = "True mean μ",
+    y = "Average estimate (all samples)"
+  ) 
+```
+
+
+```{r}
+# Average of mu_hat when H0 is rejected.
+summary_df |> 
+  ggplot(aes(x = mu_true, y = avg_mu_hat_rej)) +
+  geom_line() +
+  geom_point() +
+  scale_x_continuous(breaks = mus) +
+  labs(
+    title = "Average estimate vs. true mean (only significant tests)",
+    x = "True mean μ",
+    y = "Average estimate (rejected only)"
+  )
+```
+
+**Answer**: No. The sample average of μ_hat from only the tests where the null hypothesis was rejected is not approximately equal to the true value of μ, especially when μ is small. In the first plot, the points are almost on the diagonal line. This indicates that the average estimate μ_hat of all samples is basically consistent with the true mean μ. That is, the sample mean is an unbiased estimator. However, in the second plot, the curve no longer lies on the diagonal line. Especially when μ ≤ 2, the average estimate is significantly higher than the true mean. This happens because we only keep samples where the estimate was far enough from zero to achieve significance, which selectively inflates the mean.
 
