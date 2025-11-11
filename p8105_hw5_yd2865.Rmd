@@ -9,6 +9,7 @@ output: github_document
 knitr::opts_chunk$set(echo = TRUE)
 
 library(tidyverse)
+library(broom)
 
 theme_set(theme_minimal() + theme(legend.position = "bottom"))
 
@@ -65,9 +66,59 @@ sim_results_df |>
 
 **Comments**: As the number of group members increases, the probability that at least two people in the group have the same birthday gradually rises. When the group size is small (for example, less than 10 people), the probability is very low and it is almost impossible for the same birthday to occur. However, as the number continues to increase, this probability grows very rapidly. When the number reaches around 23 people, the probability is already close to 0.5, meaning that the chance of having the same birthday has reached half. By around 50 people, the probability is almost close to 1, which means that it is almost certain that there will be two people with the same birthday. This indicates that a relatively small group can achieve an extremely high probability of having overlapping birthdays.
 
+
 ## Problem 2
 
 ```{r}
+simulate_t_tests = function(mu, n = 30, sigma = 5, n_sim = 5000) {
+  
+  map_dfr(1:n_sim, function(i) {
+    
+    x = rnorm(n, mean = mu, sd = sigma)
+    est = mean(x)
+    se = sd(x) / sqrt(n)
+    t = est / se
+    p = 2 * pt(abs(t), df = n - 1, lower.tail = FALSE)
+    tibble(mu_true = mu, sim = i, estimate = est, p.value = p, reject = p < 0.05)
+    
+  })
+}
+```
 
+
+```{r}
+set.seed(123)
+mus = 0:6
+results_list = lapply(mus, simulate_t_tests)
+sim_results = bind_rows(results_list)
+
+# The power of the test vs. true mean
+summary_df =
+  sim_results %>%
+  group_by(mu_true) %>%
+  summarise(
+    power = mean(reject),                
+    avg_mu_hat_all = mean(estimate),             
+    avg_mu_hat_rej = mean(estimate[reject]),   
+    .groups = "drop"
+  )
+
+summary_df
+```
+
+#### Make a plot(Power vs mu_true)
+
+```{r}
+# Plot1
+summary_df |> 
+  ggplot(aes(x = mu_true, y = power)) +
+  geom_line() +
+  geom_point() +
+  scale_x_continuous(breaks = mus) +
+  labs(
+    title = "One-sample t-test Power (n = 30, sigma = 5, alpha = 0.05)",
+    x = "True mean μ",
+    y = "Power"
+  )
 ```
 
