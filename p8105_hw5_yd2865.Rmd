@@ -111,7 +111,7 @@ summary_df =
 summary_df
 ```
 
-#### Make a plot
+#### Make a plot (a)
 
 ```{r}
 # Power vs. mu_true
@@ -129,6 +129,8 @@ summary_df |>
 
 **Comments**: The plot shows how the power of the one-sample t-test increases as the true mean moves farther away from the null value of 0. When true mean = 0,the power is approximately equal to the significance level of 0.05. As the true mean increases, the power rises rapidly: when true mean reaches around 2 to 3, the power has reached a relatively high level; when true mean ≥ 4, the power approaches 1, meaning that the test can almost always correctly reject the null hypothesis. 
 This indicates that the larger the effect size, the higher the power of the test.
+
+#### Make a plot (b)
 
 ```{r}
 # Average of mu_hat across all simulations.
@@ -161,3 +163,113 @@ summary_df |>
 
 **Answer**: No. The sample average of μ_hat from only the tests where the null hypothesis was rejected is not approximately equal to the true value of μ, especially when μ is small. In the first plot, the points are almost on the diagonal line. This indicates that the average estimate μ_hat of all samples is basically consistent with the true mean μ. That is, the sample mean is an unbiased estimator. However, in the second plot, the curve no longer lies on the diagonal line. Especially when μ ≤ 2, the average estimate is significantly higher than the true mean. This happens because we only keep samples where the estimate was far enough from zero to achieve significance, which selectively inflates the mean.
 
+
+## Problem 3
+
+```{r}
+# Read data.
+homicide_data = read_csv("./homicide-data.csv")
+```
+
+**Describe the raw data**: The raw dataset contains 52,179 homicide cases record from 50 major U.S. cities between 2007 and 2017. Each row represents one homicide victim and each homicide is uniquely identified(`uid`). The dataset includes information about the victim (name:`victim_last`& `victim_first`; race: `victim_race`; gender: `victim_sex`; age: `victim_age`), the location of the homicide (`city`, `state`, `lat` and `lon`), and the `reported_date`. Of particular importance is the `disposition` variable, which indicates whether the case was solved. A case is considered unsolved when its disposition is recorded as "Closed without arrest" or "Open/No arrest”, meaning no suspect was arrested.
+
+
+```{r}
+# Tidy data.
+unsolved_levels = c("Closed without arrest", "Open/No arrest")
+
+homicide_tidy =
+  homicide_data |> 
+  mutate(
+    city_state = str_c(city, ", ", state),
+    disposition = str_trim(disposition),
+    unsolved = disposition %in% unsolved_levels
+  )
+```
+
+#### (a)
+
+```{r}
+# Calculate the total number of homicides and unsolved homicides.
+city_summary =
+  homicide_tidy |> 
+  group_by(city_state) |> 
+  summarise(
+    total_homicides = n(),
+    unsolved_homicides = sum(unsolved, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+city_summary
+```
+
+#### (b)
+
+```{r}
+# Select the data from Baltimore, MD.
+balt_df =
+  homicide_tidy |> 
+  filter(city == "Baltimore", state == "MD")
+balt_df
+
+# Estimate the proportion of homicides that are unsolved.
+balt_tidy =
+  prop.test(
+    x = sum(balt_df$unsolved, na.rm = TRUE),   
+    n = nrow(balt_df),  
+    correct = FALSE) |> 
+  broom::tidy() |> 
+  select(estimate, conf.low, conf.high)
+
+balt_tidy
+```
+
+#### (c)
+
+```{r}
+# For each of the cities
+tests_city =
+  homicide_tidy |>
+  count(city_state, unsolved, name = "n") |> 
+  pivot_wider(names_from = unsolved, values_from = n, values_fill = 0) |> 
+  transmute(
+    city_state,
+    unsolved_homicides = `TRUE`,
+    total_homicides = `TRUE` + `FALSE`) |> 
+  mutate(
+    prop_test = map2(
+      unsolved_homicides,
+      total_homicides,
+      ~ prop.test(x = .x, n = .y)),
+    tidy_out = map(prop_test, broom::tidy)) |> 
+  unnest(tidy_out) |> 
+  transmute(
+    city_state,
+    total_homicides,
+    estimate  = estimate,
+    conf.low  = conf.low,
+    conf.high = conf.high
+  ) 
+
+tests_city
+```
+
+
+#### (d)
+
+```{r}
+# Create a plot that shows the estimates and CIs for each city.
+tests_city |> 
+  mutate(city_state = fct_reorder(city_state, estimate)) |> 
+  ggplot(aes(x = city_state, y = estimate)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0) +
+  coord_flip() +
+  labs(
+    title = "Estimated Proportion of Unsolved Homicides by City (95% CI)",
+    x = NULL,
+    y = "Unsolved proportion")
+```
+
+Overall, there are significant differences in the proportion of unsolved cases across major cities in the United States, and the precision of estimates depends strongly on total case counts. Cities with more total homicides (e.g., Chicago, Baltimore) have narrow confidence intervals, reflecting more reliable estimates. Some small-sample cities triggered the warning
+"Chi-squared approximation may be incorrect" from `prop.test()`.
